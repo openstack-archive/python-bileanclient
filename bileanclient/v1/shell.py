@@ -33,7 +33,7 @@ def do_user_show(bc, args):
         formatters = {
             'status_reason': utils.text_wrap_formatter,
         }
-        utils.print_dict(user.to_dict(), formatters=formatters) 
+        utils.print_dict(user.to_dict(), formatters=formatters)
 
 
 @utils.arg('-s', '--show-deleted', default=False, action="store_true",
@@ -112,7 +112,7 @@ def do_user_recharge(bc, args):
         formatters = {
             'status_reason': utils.text_wrap_formatter,
         }
-        utils.print_dict(user.to_dict(), formatters=formatters) 
+        utils.print_dict(user.to_dict(), formatters=formatters)
 
 
 @utils.arg('id',
@@ -132,7 +132,7 @@ def do_user_attach_policy(bc, args):
         formatters = {
             'status_reason': utils.text_wrap_formatter,
         }
-        utils.print_dict(user.to_dict(), formatters=formatters) 
+        utils.print_dict(user.to_dict(), formatters=formatters)
 
 
 @utils.arg('-s', '--show-deleted', default=False, action="store_true",
@@ -155,7 +155,6 @@ def do_user_attach_policy(bc, args):
 @utils.arg('-d', '--sort-dir', metavar='[asc|desc]',
            help=_('Sorting direction (either "asc" or "desc") for the sorting '
                   'keys.'))
-
 def do_rule_list(bc, args):
     """List rules."""
     kwargs = {}
@@ -217,7 +216,7 @@ def do_rule_create(bc, args):
         raise exc.CommandError(_("Missing 'properties' key in spec file."))
 
     params = {
-        'rule': { 
+        'rule': {
             'name': args.name,
             'spec': spec,
             'metadata': utils.format_parameters(args.metadata),
@@ -245,7 +244,7 @@ def do_rule_delete(bc, args):
         try:
             bc.rules.delete(rid)
         except Exception as ex:
-            failure_count +=1
+            failure_count += 1
             print(ex)
     if failure_count > 0:
         msg = _('Failed to delete some of the specified rule(s).')
@@ -281,7 +280,8 @@ def _show_rule(bc, rule=None, rule_id=None):
 @utils.arg('-l', '--limit', metavar='<LIMIT>',
            help=_('Limit the number of policies returned.'))
 @utils.arg('-m', '--marker', metavar='<ID>',
-           help=_('Only return policies that appear after the given policy ID.'))
+           help=_('Only return policies that appear after the given '
+                  'policy ID.'))
 @utils.arg('-k', '--sort-keys', metavar='<KEY1;KEY2...>',
            help=_('List of keys for sorting the returned policies. '
                   'This can be specified multiple times or once with keys '
@@ -291,7 +291,6 @@ def _show_rule(bc, rule=None, rule_id=None):
 @utils.arg('-d', '--sort-dir', metavar='[asc|desc]',
            help=_('Sorting direction (either "asc" or "desc") for the sorting '
                   'keys.'))
-
 def do_policy_list(bc, args):
     """List policies."""
     kwargs = {}
@@ -341,7 +340,7 @@ def do_policy_list(bc, args):
 def do_policy_create(bc, args):
     """Create a policy."""
     params = {
-        'policy': { 
+        'policy': {
             'name': args.name,
             'rules': args.rule,
             'metadata': utils.format_parameters(args.metadata),
@@ -381,3 +380,77 @@ def _show_policy(bc, policy=None, policy_id=None):
 def do_policy_show(bc, args):
     """Show the policy details."""
     _show_policy(bc, policy_id=args.id)
+
+
+@utils.arg('-s', '--show-deleted', default=False, action="store_true",
+           help=_('Include soft-deleted resources in the resource listing.'))
+@utils.arg('-f', '--filters', metavar='<KEY1=VALUE1;KEY2=VALUE2...>',
+           help=_('Filter parameters to apply on returned resources. '
+                  'This can be specified multiple times, or once with '
+                  'parameters separated by a semicolon.'),
+           action='append')
+@utils.arg('-l', '--limit', metavar='<LIMIT>',
+           help=_('Limit the number of resources returned.'))
+@utils.arg('-m', '--marker', metavar='<ID>',
+           help=_('Only return resources that appear after the '
+                  'given resource ID.'))
+@utils.arg('-k', '--sort-keys', metavar='<KEY1;KEY2...>',
+           help=_('List of keys for sorting the returned resources. '
+                  'This can be specified multiple times or once with keys '
+                  'separated by semicolons. Valid sorting keys include '
+                  '"user_id", "resource_type", "created_at", "updated_at".'),
+           action='append')
+@utils.arg('-d', '--sort-dir', metavar='[asc|desc]',
+           help=_('Sorting direction (either "asc" or "desc") for the sorting '
+                  'keys.'))
+def do_resource_list(bc, args):
+    """List resources."""
+    kwargs = {}
+    fields = ['id', 'user_id', 'resource_type', 'rule_id']
+    sort_keys = ['user_id', 'resource_type', 'created_at', 'updated_at']
+
+    sortby_index = 3
+    if args:
+        kwargs = {'limit': args.limit,
+                  'marker': args.marker,
+                  'filters': utils.format_parameters(args.filters),
+                  'show_deleted': args.show_deleted}
+
+        if args.sort_keys:
+            keys = []
+            for k in args.sort_keys:
+                if ';' in k:
+                    keys.extend(k.split(';'))
+                else:
+                    keys.append(k)
+            for key in keys:
+                if key not in sort_keys:
+                    err = _("Sorting key '%(key)s' not one of the supported "
+                            "keys: %(keys)s") % {'key': key, "keys": sort_keys}
+                    raise exc.CommandError(err)
+            kwargs['sort_keys'] = keys
+            sortby_index = None
+
+        if args.sort_dir:
+            if args.sort_dir not in ('asc', 'desc'):
+                raise exc.CommandError(_("Sorting direction must be one of "
+                                         "'asc' and 'desc'"))
+            kwargs['sort_dir'] = args.sort_dir
+
+    resources = bc.resources.list(**kwargs)
+    utils.print_list(resources, fields, sortby_index=sortby_index)
+
+
+@utils.arg('id', metavar='<id>', help="ID of resource to show.")
+def do_resource_show(bc, args):
+    """Show detailed information for a resource."""
+    fields = {'resource_id': args.id}
+    try:
+        resource = bc.resources.get(**fields)
+    except exc.HTTPNotFound:
+        raise exc.CommandError(_('Resource not found: %s') % args.id)
+    else:
+        formatters = {
+            'properties': utils.json_formatter,
+        }
+        utils.print_dict(resource.to_dict(), formatters=formatters)

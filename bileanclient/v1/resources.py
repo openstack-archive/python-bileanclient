@@ -20,34 +20,34 @@ from six.moves.urllib import parse
 from bileanclient.openstack.common.apiclient import base
 
 
-class User(base.Resource):
+class BileanResource(base.Resource):
     def __repr__(self):
-        return "<User %s>" % self._info
+        return "<Resource %s>" % self._info
 
 
-class UserManager(base.BaseManager):
-    resource_class = User
+class ResourceManager(base.BaseManager):
+    resource_class = BileanResource
 
     def list(self, **kwargs):
-        """Retrieve a list of users.
+        """Retrieve a list of resources.
 
-        :rtype: list of :class:`User`.
+        :rtype: list of :class:`Resource`.
         """
         def paginate(params):
-            '''Paginate users, even if more than API limit.'''
+            '''Paginate resources, even if more than API limit.'''
             current_limit = int(params.get('limit') or 0)
-            url = '/users?%s' % parse.urlencode(params, True)
-            users = self._list(url, 'users')
-            for user in users:
-                yield user
+            url = '/resources?%s' % parse.urlencode(params, True)
+            resources = self._list(url, 'resources')
+            for resource in resources:
+                yield resource
 
-            num_users = len(users)
-            remaining_limit = current_limit - num_users
-            if remaining_limit > 0 and num_users > 0:
+            num_resources = len(resources)
+            remaining_limit = current_limit - num_resources
+            if remaining_limit > 0 and num_resources > 0:
                 params['limit'] = remaining_limit
-                params['marker'] = user.id
-                for user in paginate(params):
-                    yield user
+                params['marker'] = resource.id
+                for resource in paginate(params):
+                    yield resource
 
         params = {}
         if 'filters' in kwargs:
@@ -60,14 +60,9 @@ class UserManager(base.BaseManager):
 
         return paginate(params)
 
-    def get(self, user_id):
-        """Get the details for a specific user.
+    def get(self, resource_id):
+        """Get the details for a specific resource.
 
-        :param user_id: ID of the user
+        :param resource_id: ID of the resource
         """
-        return self._get('/users/%s' % user_id, 'user')
-
-    def action(self, user_id, **kwargs):
-        """Perform specified action on user."""
-        url = '/users/%s/action' % user_id
-        return self._post(url, json=kwargs, response_key='user')
+        return self._get('/resources/%s' % resource_id, 'resource')

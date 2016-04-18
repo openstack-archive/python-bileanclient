@@ -21,11 +21,10 @@ from bileanclient import client
 from bileanclient import exc as exceptions
 
 
-__version__ = "1.0"
-# __version__ = pbr.version.VersionInfo('python-bileanclient').version_string()
+__version__ = pbr.version.VersionInfo('python-bileanclient').version_string()
 
 __all__ = [
-        'client',
-        'exc',
-        'exceptions',
+    'client',
+    'exc',
+    'exceptions',
 ]

@@ -19,8 +19,7 @@ from bileanclient.common import http
 from bileanclient.v1 import policies
 from bileanclient.v1 import rules
 from bileanclient.v1 import users
-#from bileanclient.v1 import bilean_resource
-#from bileanclient.v1 import event
+from bileanclient.v1 import resources
 
 
 class Client(object):
@@ -39,5 +38,4 @@ class Client(object):
         self.users = users.UserManager(self.http_client)
         self.rules = rules.RuleManager(self.http_client)
         self.policies = policies.PolicyManager(self.http_client)
-        #self.resource = bilean_resource.ResourceManager(self.http_client)
-        #self.event = event.EventManager(self.http_client)
+        self.resources = resources.ResourceManager(self.http_client)
