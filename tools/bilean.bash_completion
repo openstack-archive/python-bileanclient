@@ -1,0 +1,27 @@
+# bash completion for openstack bilean 
+
+_bilean_opts="" # lazy init
+_bilean_flags="" # lazy init
+_bilean_opts_exp="" # lazy init
+_bilean()
+{
+    local cur prev kbc
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    if [ "x$_bilean_opts" == "x" ] ; then
+        kbc="`bilean bash-completion | sed -e "s/ -h / /"`"
+        _bilean_opts="`echo "$kbc" | sed -e "s/--[a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
+        _bilean_flags="`echo " $kbc" | sed -e "s/ [^-][^-][a-z0-9_-]*//g" -e "s/[ ][ ]*/ /g"`"
+        _bilean_opts_exp="`echo $_bilean_opts | sed -e "s/[ ]/|/g"`"
+    fi
+
+    if [[ " ${COMP_WORDS[@]} " =~ " "($_bilean_opts_exp)" " && "$prev" != "help" ]] ; then
+        COMPREPLY=($(compgen -W "${_bilean_flags}" -- ${cur}))
+    else
+        COMPREPLY=($(compgen -W "${_bilean_opts}" -- ${cur}))
+    fi
+    return 0
+}
+complete -o default -F _bilean bilean 
