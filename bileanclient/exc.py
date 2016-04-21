@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-#
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -12,50 +10,185 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from bileanclient.openstack.common.apiclient import exceptions
-from bileanclient.openstack.common.apiclient.exceptions import *  # noqa
+import sys
+
+from oslo_serialization import jsonutils
+from oslo_utils import reflection
+
+from bileanclient.openstack.common._i18n import _
+
+verbose = 0
 
 
-# NOTE(akurilin): This alias is left here since v.0.1.3 to support backwards
-# compatibility.
-InvalidEndpoint = EndpointException
-CommunicationError = ConnectionRefused
-HTTPBadRequest = BadRequest
-HTTPInternalServerError = InternalServerError
-HTTPNotFound = NotFound
-HTTPServiceUnavailable = ServiceUnavailable
+class BaseException(Exception):
+    """An error occurred."""
+    def __init__(self, message=None):
+        self.message = message
+
+    def __str__(self):
+        return self.message or self.__class__.__doc__
 
 
-class AmbiguousAuthSystem(ClientException):
-    """Could not obtain token and endpoint using provided credentials."""
+class CommandError(BaseException):
+    """Invalid usage of CLI."""
+
+
+class InvalidEndpoint(BaseException):
+    """The provided endpoint is invalid."""
+
+
+class CommunicationError(BaseException):
+    """Unable to communicate with server."""
+
+
+class HTTPException(BaseException):
+    """Base exception for all HTTP-derived exceptions."""
+    code = 'N/A'
+
+    def __init__(self, message=None, code=None):
+        super(HTTPException, self).__init__(message)
+        try:
+            self.error = jsonutils.loads(message)
+            if 'error' not in self.error:
+                raise KeyError(_('Key "error" not exists'))
+        except KeyError:
+            # NOTE(jianingy): If key 'error' happens not exist,
+            # self.message becomes no sense. In this case, we
+            # return doc of current exception class instead.
+            self.error = {'error':
+                          {'message': self.__class__.__doc__}}
+        except Exception:
+            self.error = {'error':
+                          {'message': self.message or self.__class__.__doc__}}
+        if self.code == "N/A" and code is not None:
+            self.code = code
+
+    def __str__(self):
+        message = self.error['error'].get('message', 'Internal Error')
+        if verbose:
+            traceback = self.error['error'].get('traceback', '')
+            return (_('ERROR: %(message)s\n%(traceback)s') %
+                    {'message': message, 'traceback': traceback})
+        else:
+            return _('ERROR: %s') % message
+
+
+class HTTPMultipleChoices(HTTPException):
+    code = 300
+
+    def __str__(self):
+        self.details = _("Requested version of Bilean API is not"
+                         "available.")
+        return (_("%(name)s (HTTP %(code)s) %(details)s") %
+                {
+                'name': reflection.get_class_name(self, fully_qualified=False),
+                'code': self.code,
+                'details': self.details})
+
+
+class BadRequest(HTTPException):
+    """DEPRECATED."""
+    code = 400
+
+
+class HTTPBadRequest(BadRequest):
     pass
 
-# Alias for backwards compatibility
-AmbigiousAuthSystem = AmbiguousAuthSystem
+
+class Unauthorized(HTTPException):
+    """DEPRECATED."""
+    code = 401
 
 
-class InvalidAttribute(ClientException):
+class HTTPUnauthorized(Unauthorized):
     pass
 
 
-def from_response(response, message=None, traceback=None, method=None,
-                  url=None):
-    """Return an HttpError instance based on response from httplib/requests."""
+class Forbidden(HTTPException):
+    """DEPRECATED."""
+    code = 403
 
-    error_body = {}
-    if message:
-        error_body['message'] = message
-    if traceback:
-        error_body['details'] = traceback
 
-    if hasattr(response, 'status') and not hasattr(response, 'status_code'):
-        # NOTE(akurilin): These modifications around response object give
-        # ability to get all necessary information in method `from_response`
-        # from common code, which expecting response object from `requests`
-        # library instead of object from `httplib/httplib2` library.
-        response.status_code = response.status
-        response.headers = {
-            'Content-Type': response.getheader('content-type', "")}
-        response.json = lambda: {'error': error_body}
+class HTTPForbidden(Forbidden):
+    pass
 
-    return exceptions.from_response(response, message, url)
+
+class NotFound(HTTPException):
+    """DEPRECATED."""
+    code = 404
+
+
+class HTTPNotFound(NotFound):
+    pass
+
+
+class HTTPMethodNotAllowed(HTTPException):
+    code = 405
+
+
+class Conflict(HTTPException):
+    """DEPRECATED."""
+    code = 409
+
+
+class HTTPConflict(Conflict):
+    pass
+
+
+class OverLimit(HTTPException):
+    """DEPRECATED."""
+    code = 413
+
+
+class HTTPOverLimit(OverLimit):
+    pass
+
+
+class HTTPUnsupported(HTTPException):
+    code = 415
+
+
+class HTTPInternalServerError(HTTPException):
+    code = 500
+
+
+class HTTPNotImplemented(HTTPException):
+    code = 501
+
+
+class HTTPBadGateway(HTTPException):
+    code = 502
+
+
+class ServiceUnavailable(HTTPException):
+    """DEPRECATED."""
+    code = 503
+
+
+class HTTPServiceUnavailable(ServiceUnavailable):
+    pass
+
+
+# NOTE(bcwaldon): Build a mapping of HTTP codes to corresponding exception
+# classes
+_code_map = {}
+for obj_name in dir(sys.modules[__name__]):
+    if obj_name.startswith('HTTP'):
+        obj = getattr(sys.modules[__name__], obj_name)
+        _code_map[obj.code] = obj
+
+
+def from_response(response):
+    """Return an instance of an HTTPException based on requests response."""
+    cls = _code_map.get(response.status_code, HTTPException)
+    return cls(response.content, response.status_code)
+
+
+class NoTokenLookupException(Exception):
+    """DEPRECATED."""
+    pass
+
+
+class EndpointNotFound(Exception):
+    """DEPRECATED."""
+    pass

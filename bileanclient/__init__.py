@@ -17,14 +17,14 @@
 
 import pbr.version
 
-from bileanclient import client
+from bileanclient.client import Client
 from bileanclient import exc as exceptions
 
 
 __version__ = pbr.version.VersionInfo('python-bileanclient').version_string()
 
 __all__ = [
-    'client',
+    'Client',
     'exc',
     'exceptions',
 ]

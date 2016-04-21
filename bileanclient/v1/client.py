@@ -34,7 +34,7 @@ class Client(object):
 
     def __init__(self, *args, **kwargs):
         """Initialize a new client for the Bilean v1 API."""
-        self.http_client = http._construct_http_client(*args, **kwargs)
+        self.http_client = http.get_http_client(*args, **kwargs)
         self.users = users.UserManager(self.http_client)
         self.rules = rules.RuleManager(self.http_client)
         self.policies = policies.PolicyManager(self.http_client)

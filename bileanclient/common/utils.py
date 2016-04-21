@@ -13,13 +13,20 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from __future__ import print_function
+
+import hashlib
 import logging
 import textwrap
 
 from oslo_serialization import jsonutils
+from oslo_utils import encodeutils
 from oslo_utils import importutils
 import prettytable
+import re
 import six
+from six.moves.urllib import parse
+import sys
 import yaml
 
 from bileanclient import exc
@@ -29,11 +36,7 @@ from bileanclient.openstack.common import cliutils
 
 LOG = logging.getLogger(__name__)
 
-
-supported_formats = {
-    "json": lambda x: jsonutils.dumps(x, indent=2),
-    "yaml": yaml.safe_dump
-}
+SENSITIVE_HEADERS = ('X-Auth-Token', )
 
 # Using common methods from oslo cliutils
 arg = cliutils.arg
@@ -81,22 +84,19 @@ def print_dict(d, formatters=None):
     print(pt.get_string(sortby='Property'))
 
 
-def event_log_formatter(events):
-    """Return the events in log format."""
-    event_log = []
-    log_format = ("%(event_time)s "
-                  "[%(rsrc_name)s]: %(rsrc_status)s  %(rsrc_status_reason)s")
-    for event in events:
-        event_time = getattr(event, 'event_time', '')
-        log = log_format % {
-            'event_time': event_time.replace('T', ' '),
-            'rsrc_name': getattr(event, 'resource_name', ''),
-            'rsrc_status': getattr(event, 'resource_status', ''),
-            'rsrc_status_reason': getattr(event, 'resource_status_reason', '')
-        }
-        event_log.append(log)
+def skip_authentication(f):
+    """Function decorator used to indicate a caller may be unauthenticated."""
+    f.require_authentication = False
+    return f
 
-    return "\n".join(event_log)
+
+def is_authentication_required(f):
+    """Checks to see if the function requires authentication.
+
+    Use the skip_authentication decorator to indicate a caller may
+    skip the authentication step.
+    """
+    return getattr(f, 'require_authentication', True)
 
 
 def import_versioned_module(version, submodule=None):
@@ -104,6 +104,55 @@ def import_versioned_module(version, submodule=None):
     if submodule:
         module = '.'.join((module, submodule))
     return importutils.import_module(module)
+
+
+def exit(msg='', exit_code=1):
+    if msg:
+        print_err(msg)
+    sys.exit(exit_code)
+
+
+def print_err(msg):
+    print(encodeutils.safe_decode(msg), file=sys.stderr)
+
+
+def safe_header(name, value):
+    if value is not None and name in SENSITIVE_HEADERS:
+        h = hashlib.sha1(value)
+        d = h.hexdigest()
+        return name, "{SHA1}%s" % d
+    else:
+        return name, value
+
+
+def debug_enabled(argv):
+    if bool(env('BILEANCLIENT_DEBUG')) is True:
+        return True
+    if '--debug' in argv or '-d' in argv:
+        return True
+    return False
+
+
+def strip_version(endpoint):
+    """Strip version from the last component of endpoint if present."""
+    # NOTE(flaper87): This shouldn't be necessary if
+    # we make endpoint the first argument. However, we
+    # can't do that just yet because we need to keep
+    # backwards compatibility.
+    if not isinstance(endpoint, six.string_types):
+        raise ValueError("Expected endpoint")
+
+    version = None
+    # Get rid of trailing '/' if present
+    endpoint = endpoint.rstrip('/')
+    url_parts = parse.urlparse(endpoint)
+    (scheme, netloc, path, __, __, __) = url_parts
+    path = path.lstrip('/')
+    # regex to match 'v1' or 'v2.0' etc
+    if re.match('v\d+\.?\d*', path):
+        version = float(path.lstrip('v'))
+        endpoint = scheme + '://' + netloc
+    return endpoint, version
 
 
 def format_parameters(params, parse_semicolon=True):
@@ -136,6 +185,33 @@ def format_parameters(params, parse_semicolon=True):
     return parameters
 
 
+def get_response_body(resp):
+    body = resp.content
+    if 'application/json' in resp.headers.get('content-type', ''):
+        try:
+            body = resp.json()
+        except ValueError:
+            LOG.error(_LE('Could not decode response body as JSON'))
+    else:
+        body = None
+    return body
+
+
+def parse_query_url(url):
+    base_url, query_params = url.split('?')
+    return base_url, parse.parse_qs(query_params)
+
+
+def get_spec_content(filename):
+    with open(filename, 'r') as f:
+        try:
+            data = yaml.load(f)
+        except Exception as ex:
+            raise exc.CommandError(_('The specified file is not a valid '
+                                     'YAML file: %s') % six.text_type(ex))
+    return data
+
+
 def format_nested_dict(d, fields, column_names):
     if d is None:
         return ''
@@ -156,25 +232,3 @@ def format_nested_dict(d, fields, column_names):
 
 def nested_dict_formatter(d, column_names):
     return lambda o: format_nested_dict(o, d, column_names)
-
-
-def get_spec_content(filename):
-    with open(filename, 'r') as f:
-        try:
-            data = yaml.load(f)
-        except Exception as ex:
-            raise exc.CommandError(_('The specified file is not a valid '
-                                     'YAML file: %s') % six.text_type(ex))
-    return data
-
-
-def get_response_body(resp):
-    body = resp.content
-    if 'application/json' in resp.headers.get('content-type', ''):
-        try:
-            body = resp.json()
-        except ValueError:
-            LOG.error(_LE('Could not decode response body as JSON'))
-    else:
-        body = None
-    return body

@@ -10,10 +10,47 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import warnings
+
 from bileanclient.common import utils
 
 
-def Client(version, *args, **kwargs):
-    module = utils.import_versioned_module(version, 'client')
+def Client(version=None, endpoint=None, session=None, *args, **kwargs):
+    """Client for the OpenStack Billing API.
+
+    Generic client for the OpenStack Billing API. See version classes
+    for specific details.
+
+    :param string version: The version of API to use.
+    :param session: A keystoneclient session that should be used for transport.
+    :type session: keystoneclient.session.Session
+    """
+    if session:
+        if endpoint:
+            kwargs.setdefault('endpoint_override', endpoint)
+
+            if not version:
+                __, version = utils.strip_version(endpoint)
+
+        if not version:
+            msg = ("You must provide a client version when using session")
+            raise RuntimeError(msg)
+
+    else:
+        if version is not None:
+            warnings.warn(("`version` keyword is being deprecated. Please pass"
+                           " the version as part of the URL. "
+                           "http://$HOST:$PORT/v$VERSION_NUMBER"),
+                          DeprecationWarning)
+
+        endpoint, url_version = utils.strip_version(endpoint)
+        version = version or url_version
+
+        if not version:
+            msg = ("Please provide either the version or an url with the form "
+                   "http://$HOST:$PORT/v$VERSION_NUMBER")
+            raise RuntimeError(msg)
+
+    module = utils.import_versioned_module(int(version), 'client')
     client_class = getattr(module, 'Client')
-    return client_class(*args, **kwargs)
+    return client_class(endpoint, *args, session=session, **kwargs)

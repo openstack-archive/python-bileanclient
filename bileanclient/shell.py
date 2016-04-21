@@ -1,3 +1,6 @@
+# Copyright 2012 OpenStack Foundation
+# All Rights Reserved.
+#
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -11,237 +14,98 @@
 #    under the License.
 
 """
-Command-line interface to the Bilean API.
+Command-line interface to the OpenStack Bilean API.
 """
 
 from __future__ import print_function
 
 import argparse
+import copy
+import getpass
+import hashlib
+import json
 import logging
+import os
 import sys
+import traceback
 
 from oslo_utils import encodeutils
 from oslo_utils import importutils
-import six
 import six.moves.urllib.parse as urlparse
+
+import bileanclient
+from bileanclient._i18n import _
+from bileanclient.common import utils
+from bileanclient import exc
 
 from keystoneclient.auth.identity import v2 as v2_auth
 from keystoneclient.auth.identity import v3 as v3_auth
 from keystoneclient import discover
 from keystoneclient import exceptions as ks_exc
-from keystoneclient import session as kssession
+from keystoneclient import session
 
-import bileanclient
-from bileanclient import client as bilean_client
-from bileanclient.common import utils
-from bileanclient import exc
-from bileanclient.openstack.common._i18n import _
-
-logger = logging.getLogger(__name__)
 osprofiler_profiler = importutils.try_import("osprofiler.profiler")
+
+SUPPORTED_VERSIONS = [1,]
 
 
 class BileanShell(object):
 
     def _append_global_identity_args(self, parser):
-        # FIXME: these are global identity (Keystone) arguments which
-        # should be consistent and shared by all service clients. Therefore,
-        # they should be provided by python-keystoneclient. We will need to
-        # refactor this code once this functionality is avaible in
-        # python-keystoneclient.
-        parser.add_argument(
-            '-k', '--insecure', default=False, action='store_true',
-            help=_('Explicitly allow bileanclient to perform '
-                   '\"insecure SSL\" (https) requests. '
-                   'The server\'s certificate will not be verified '
-                   'against any certificate authorities. '
-                   'This option should be used with caution.'))
-
-        parser.add_argument(
-            '--os-cert',
-            help=_('Path of certificate file to use in SSL connection. '
-                   'This file can optionally be prepended with '
-                   'the private key.'))
-
-        # for backward compatibility only
-        parser.add_argument('--cert-file',
-                            dest='os_cert',
-                            help=_('DEPRECATED! Use %(arg)s.') %
-                                 {'arg': '--os-cert'})
-
-        parser.add_argument('--os-key',
-                            help=_('Path of client key to use in SSL '
-                                   'connection. This option is not necessary '
-                                   'if your key is prepended to your cert '
-                                   'file.'))
+        # register common identity args
+        session.Session.register_cli_options(parser)
+        v3_auth.Password.register_argparse_arguments(parser)
 
         parser.add_argument('--key-file',
                             dest='os_key',
-                            help=_('DEPRECATED! Use %(arg)s.') %
-                                 {'arg': '--os-key'})
-
-        parser.add_argument('--os-cacert',
-                            metavar='<ca-certificate-file>',
-                            dest='os_cacert',
-                            default=utils.env('OS_CACERT'),
-                            help=_('Path of CA TLS certificate(s) used to '
-                                   'verify the remote server\'s certificate. '
-                                   'Without this option glance looks for the '
-                                   'default system CA certificates.'))
+                            help='DEPRECATED! Use --os-key.')
 
         parser.add_argument('--ca-file',
                             dest='os_cacert',
-                            help=_('DEPRECATED! Use %(arg)s.') %
-                                 {'arg': '--os-cacert'})
+                            help='DEPRECATED! Use --os-cacert.')
 
-        parser.add_argument('--os-username',
-                            default=utils.env('OS_USERNAME'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_USERNAME]'
-                            })
-
-        parser.add_argument('--os_username',
-                            help=argparse.SUPPRESS)
-
-        parser.add_argument('--os-user-id',
-                            default=utils.env('OS_USER_ID'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_USER_ID]'
-                            })
-
-        parser.add_argument('--os_user_id',
-                            help=argparse.SUPPRESS)
-
-        parser.add_argument('--os-user-domain-id',
-                            default=utils.env('OS_USER_DOMAIN_ID'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_USER_DOMAIN_ID]'
-                            })
-
-        parser.add_argument('--os_user_domain_id',
-                            help=argparse.SUPPRESS)
-
-        parser.add_argument('--os-user-domain-name',
-                            default=utils.env('OS_USER_DOMAIN_NAME'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_USER_DOMAIN_NAME]'
-                            })
-
-        parser.add_argument('--os_user_domain_name',
-                            help=argparse.SUPPRESS)
-
-        parser.add_argument('--os-project-id',
-                            default=utils.env('OS_PROJECT_ID'),
-                            help=(_('Another way to specify tenant ID. '
-                                    'This option is mutually exclusive with '
-                                    '%(arg)s. Defaults to %(value)s.') %
-                                  {
-                                      'arg': '--os-tenant-id',
-                                      'value': 'env[OS_PROJECT_ID]'}))
-
-        parser.add_argument('--os_project_id',
-                            help=argparse.SUPPRESS)
-
-        parser.add_argument('--os-project-name',
-                            default=utils.env('OS_PROJECT_NAME'),
-                            help=(_('Another way to specify tenant name. '
-                                    'This option is mutually exclusive with '
-                                    '%(arg)s. Defaults to %(value)s.') %
-                                  {
-                                      'arg': '--os-tenant-name',
-                                      'value': 'env[OS_PROJECT_NAME]'}))
-
-        parser.add_argument('--os_project_name',
-                            help=argparse.SUPPRESS)
-
-        parser.add_argument('--os-project-domain-id',
-                            default=utils.env('OS_PROJECT_DOMAIN_ID'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_PROJECT_DOMAIN_ID]'
-                            })
-
-        parser.add_argument('--os_project_domain_id',
-                            help=argparse.SUPPRESS)
-
-        parser.add_argument('--os-project-domain-name',
-                            default=utils.env('OS_PROJECT_DOMAIN_NAME'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_PROJECT_DOMAIN_NAME]'
-                            })
-
-        parser.add_argument('--os_project_domain_name',
-                            help=argparse.SUPPRESS)
-
-        parser.add_argument('--os-password',
-                            default=utils.env('OS_PASSWORD'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_PASSWORD]'
-                            })
-
-        parser.add_argument('--os_password',
-                            help=argparse.SUPPRESS)
+        parser.add_argument('--cert-file',
+                            dest='os_cert',
+                            help='DEPRECATED! Use --os-cert.')
 
         parser.add_argument('--os-tenant-id',
                             default=utils.env('OS_TENANT_ID'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_TENANT_ID]'
-                            })
+                            help='Defaults to env[OS_TENANT_ID].')
 
         parser.add_argument('--os_tenant_id',
-                            default=utils.env('OS_TENANT_ID'),
                             help=argparse.SUPPRESS)
 
         parser.add_argument('--os-tenant-name',
                             default=utils.env('OS_TENANT_NAME'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_TENANT_NAME]'
-                            })
+                            help='Defaults to env[OS_TENANT_NAME].')
 
         parser.add_argument('--os_tenant_name',
-                            default=utils.env('OS_TENANT_NAME'),
-                            help=argparse.SUPPRESS)
-
-        parser.add_argument('--os-auth-url',
-                            default=utils.env('OS_AUTH_URL'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_AUTH_URL]'
-                            })
-
-        parser.add_argument('--os_auth_url',
                             help=argparse.SUPPRESS)
 
         parser.add_argument('--os-region-name',
                             default=utils.env('OS_REGION_NAME'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_REGION_NAME]'
-                            })
+                            help='Defaults to env[OS_REGION_NAME].')
 
         parser.add_argument('--os_region_name',
                             help=argparse.SUPPRESS)
 
         parser.add_argument('--os-auth-token',
                             default=utils.env('OS_AUTH_TOKEN'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_AUTH_TOKEN]'
-                            })
+                            help='Defaults to env[OS_AUTH_TOKEN].')
 
         parser.add_argument('--os_auth_token',
                             help=argparse.SUPPRESS)
 
         parser.add_argument('--os-service-type',
                             default=utils.env('OS_SERVICE_TYPE'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_SERVICE_TYPE]'
-                            })
+                            help='Defaults to env[OS_SERVICE_TYPE].')
 
         parser.add_argument('--os_service_type',
                             help=argparse.SUPPRESS)
 
         parser.add_argument('--os-endpoint-type',
                             default=utils.env('OS_ENDPOINT_TYPE'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[OS_ENDPOINT_TYPE]'
-                            })
+                            help='Defaults to env[OS_ENDPOINT_TYPE].')
 
         parser.add_argument('--os_endpoint_type',
                             help=argparse.SUPPRESS)
@@ -250,9 +114,8 @@ class BileanShell(object):
         parser = argparse.ArgumentParser(
             prog='bilean',
             description=__doc__.strip(),
-            epilog=_('See "%(arg)s" for help on a specific command.') % {
-                'arg': 'bilean help COMMAND'
-            },
+            epilog='See "bilean help COMMAND" '
+                   'for help on a specific command.',
             add_help=False,
             formatter_class=HelpFormatter,
         )
@@ -260,90 +123,63 @@ class BileanShell(object):
         # Global arguments
         parser.add_argument('-h', '--help',
                             action='store_true',
-                            help=argparse.SUPPRESS)
+                            help=argparse.SUPPRESS,
+                            )
 
         parser.add_argument('--version',
                             action='version',
-                            version=bileanclient.__version__,
-                            help=_("Shows the client version and exits."))
+                            version=bileanclient.__version__)
 
         parser.add_argument('-d', '--debug',
-                            default=bool(utils.env('HEATCLIENT_DEBUG')),
+                            default=bool(utils.env('BILEANCLIENT_DEBUG')),
                             action='store_true',
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[HEATCLIENT_DEBUG]'
-                            })
+                            help='Defaults to env[BILEANCLIENT_DEBUG].')
 
         parser.add_argument('-v', '--verbose',
                             default=False, action="store_true",
-                            help=_("Print more verbose output."))
+                            help="Print more verbose output.")
 
-        parser.add_argument('--api-timeout',
-                            help=_('Number of seconds to wait for an '
-                                   'API response, '
-                                   'defaults to system socket timeout'))
+        parser.add_argument('-f', '--force',
+                            dest='force',
+                            default=False, action='store_true',
+                            help='Prevent select actions from requesting '
+                            'user confirmation.')
 
-        # os-no-client-auth tells bileanclient to use token, instead of
-        # env[OS_AUTH_URL]
-        parser.add_argument('--os-no-client-auth',
-                            default=utils.env('OS_NO_CLIENT_AUTH'),
-                            action='store_true',
-                            help=(_("Do not contact keystone for a token. "
-                                    "Defaults to %(value)s.") %
-                                  {'value': 'env[OS_NO_CLIENT_AUTH]'}))
+        parser.add_argument('--os-bilean-url',
+                            default=utils.env('OS_BILEAN_URL'),
+                            help=('Defaults to env[OS_BILEAN_URL]. '
+                                  'If the provided bilean url contains '
+                                  'a version number and '
+                                  '`--os-bilean-api-version` is omitted '
+                                  'the version of the URL will be picked as '
+                                  'the bilean api version to use.'))
 
-        parser.add_argument('--bilean-url',
-                            default=utils.env('HEAT_URL'),
-                            help=_('Defaults to %(value)s.') % {
-                                'value': 'env[HEAT_URL]'
-                            })
-
-        parser.add_argument('--bilean_url',
+        parser.add_argument('--os_bilean_url',
                             help=argparse.SUPPRESS)
 
-        parser.add_argument('--bilean-api-version',
-                            default=utils.env('HEAT_API_VERSION', default='1'),
-                            help=_('Defaults to %(value)s or 1.') % {
-                                'value': 'env[HEAT_API_VERSION]'
-                            })
+        parser.add_argument('--os-bilean-api-version',
+                            default=utils.env('OS_BILEAN_API_VERSION',
+                                              default=None),
+                            help='Defaults to env[OS_BILEAN_API_VERSION] or 2.')
 
-        parser.add_argument('--bilean_api_version',
+        parser.add_argument('--os_bilean_api_version',
                             help=argparse.SUPPRESS)
 
-        # This unused option should remain so that scripts that
-        # use it do not break. It is suppressed so it will not
-        # appear in the help.
-        parser.add_argument('-t', '--token-only',
-                            default=bool(False),
-                            action='store_true',
-                            help=argparse.SUPPRESS)
-
-        parser.add_argument('--include-password',
-                            default=bool(utils.env('HEAT_INCLUDE_PASSWORD')),
-                            action='store_true',
-                            help=_('Send %(arg1)s and %(arg2)s to bilean.') % {
-                                'arg1': 'os-username',
-                                'arg2': 'os-password'
-                            })
-
-        # FIXME(gyee): this method should come from python-keystoneclient.
-        # Will refactor this code once it is available.
-        # https://bugs.launchpad.net/python-keystoneclient/+bug/1332337
+        if osprofiler_profiler:
+            parser.add_argument('--profile',
+                                metavar='HMAC_KEY',
+                                help='HMAC key to use for encrypting context '
+                                'data for performance profiling of operation. '
+                                'This key should be the value of HMAC key '
+                                'configured in osprofiler middleware in '
+                                'bilean, it is specified in paste '
+                                'configuration(/etc/bilean/api-paste.ini). '
+                                'Without key the profiling will not be '
+                                'triggered even if osprofiler is enabled on '
+                                'server side.')
 
         self._append_global_identity_args(parser)
 
-        if osprofiler_profiler:
-            parser.add_argument(
-                '--profile',
-                metavar='HMAC_KEY',
-                help=_('HMAC key to use for encrypting context data '
-                       'for performance profiling of operation. '
-                       'This key should be the value of HMAC key '
-                       'configured in osprofiler middleware in bilean, '
-                       'it is specified in the paste configuration '
-                       '(/etc/bilean/api-paste.ini). Without the key, '
-                       'profiling will not be triggered '
-                       'even if osprofiler is enabled on server side.'))
         return parser
 
     def get_subcommand_parser(self, version):
@@ -352,24 +188,18 @@ class BileanShell(object):
         self.subcommands = {}
         subparsers = parser.add_subparsers(metavar='<subcommand>')
         submodule = utils.import_versioned_module(version, 'shell')
+
         self._find_actions(subparsers, submodule)
         self._find_actions(subparsers, self)
+
         self._add_bash_completion_subparser(subparsers)
 
         return parser
 
-    def _add_bash_completion_subparser(self, subparsers):
-        subparser = subparsers.add_parser(
-            'bash_completion',
-            add_help=False,
-            formatter_class=HelpFormatter
-        )
-        self.subcommands['bash_completion'] = subparser
-        subparser.set_defaults(func=self.do_bash_completion)
-
     def _find_actions(self, subparsers, actions_module):
         for attr in (a for a in dir(actions_module) if a.startswith('do_')):
-            # I prefer to be hyphen-separated instead of underscores.
+            # Replace underscores with hyphens in the commands
+            # displayed to the user
             command = attr[3:].replace('_', '-')
             callback = getattr(actions_module, attr)
             desc = callback.__doc__ or ''
@@ -380,26 +210,34 @@ class BileanShell(object):
                                               help=help,
                                               description=desc,
                                               add_help=False,
-                                              formatter_class=HelpFormatter)
+                                              formatter_class=HelpFormatter
+                                              )
             subparser.add_argument('-h', '--help',
                                    action='help',
-                                   help=argparse.SUPPRESS)
+                                   help=argparse.SUPPRESS,
+                                   )
             self.subcommands[command] = subparser
             for (args, kwargs) in arguments:
                 subparser.add_argument(*args, **kwargs)
             subparser.set_defaults(func=callback)
 
-    def _setup_logging(self, debug):
-        log_lvl = logging.DEBUG if debug else logging.WARNING
-        logging.basicConfig(
-            format="%(levelname)s (%(module)s) %(message)s",
-            level=log_lvl)
-        logging.getLogger('iso8601').setLevel(logging.WARNING)
-        logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
+    def _add_bash_completion_subparser(self, subparsers):
+        subparser = subparsers.add_parser('bash_completion',
+                                          add_help=False,
+                                          formatter_class=HelpFormatter)
+        self.subcommands['bash_completion'] = subparser
+        subparser.set_defaults(func=self.do_bash_completion)
 
-    def _setup_verbose(self, verbose):
-        if verbose:
-            exc.verbose = 1
+    def _get_bilean_url(self, args):
+        """Translate the available url-related options into a single string.
+
+        Return the endpoint that should be used to talk to Bilean if a
+        clear decision can be made. Otherwise, return None.
+        """
+        if args.os_bilean_url:
+            return args.os_bilean_url
+        else:
+            return None
 
     def _discover_auth_versions(self, session, auth_url):
         # discover the API versions the server is supporting base on the
@@ -410,7 +248,7 @@ class BileanShell(object):
             ks_discover = discover.Discover(session=session, auth_url=auth_url)
             v2_auth_url = ks_discover.url_for('2.0')
             v3_auth_url = ks_discover.url_for('3.0')
-        except ks_exc.ClientException:
+        except ks_exc.ClientException as e:
             # Identity service may not support discover API version.
             # Lets trying to figure out the API version from the original URL.
             url_parts = urlparse.urlparse(auth_url)
@@ -422,269 +260,313 @@ class BileanShell(object):
                 v2_auth_url = auth_url
             else:
                 # not enough information to determine the auth version
-                msg = _('Unable to determine the Keystone version '
-                        'to authenticate with using the given '
-                        'auth_url. Identity service may not support API '
-                        'version discovery. Please provide a versioned '
-                        'auth_url instead.')
+                msg = ('Unable to determine the Keystone version '
+                       'to authenticate with using the given '
+                       'auth_url. Identity service may not support API '
+                       'version discovery. Please provide a versioned '
+                       'auth_url instead. error=%s') % (e)
                 raise exc.CommandError(msg)
 
         return (v2_auth_url, v3_auth_url)
 
     def _get_keystone_session(self, **kwargs):
-        # first create a Keystone session
-        cacert = kwargs.pop('cacert', None)
-        cert = kwargs.pop('cert', None)
-        key = kwargs.pop('key', None)
-        insecure = kwargs.pop('insecure', False)
-        timeout = kwargs.pop('timeout', None)
-        verify = kwargs.pop('verify', None)
+        ks_session = session.Session.construct(kwargs)
 
-        # FIXME(gyee): this code should come from keystoneclient
-        if verify is None:
-            if insecure:
-                verify = False
-            else:
-                # TODO(gyee): should we do
-                # bileanclient.common.http.get_system_ca_fle()?
-                verify = cacert or True
-        if cert and key:
-            # passing cert and key together is deprecated in favour of the
-            # requests lib form of having the cert and key as a tuple
-            cert = (cert, key)
-
-        return kssession.Session(verify=verify, cert=cert, timeout=timeout)
-
-    def _get_keystone_v3_auth(self, v3_auth_url, **kwargs):
-        auth_token = kwargs.pop('auth_token', None)
-        if auth_token:
-            return v3_auth.Token(v3_auth_url, auth_token)
-        else:
-            return v3_auth.Password(v3_auth_url, **kwargs)
-
-    def _get_keystone_v2_auth(self, v2_auth_url, **kwargs):
-        auth_token = kwargs.pop('auth_token', None)
-        tenant_id = kwargs.pop('project_id', None)
-        tenant_name = kwargs.pop('project_name', None)
-        if auth_token:
-            return v2_auth.Token(v2_auth_url, auth_token,
-                                 tenant_id=tenant_id,
-                                 tenant_name=tenant_name)
-        else:
-            return v2_auth.Password(v2_auth_url,
-                                    username=kwargs.pop('username', None),
-                                    password=kwargs.pop('password', None),
-                                    tenant_id=tenant_id,
-                                    tenant_name=tenant_name)
-
-    def _get_keystone_auth(self, session, auth_url, **kwargs):
-        # FIXME(dhu): this code should come from keystoneclient
-
-        # discover the supported keystone versions using the given url
+        # discover the supported keystone versions using the given auth url
+        auth_url = kwargs.pop('auth_url', None)
         (v2_auth_url, v3_auth_url) = self._discover_auth_versions(
-            session=session,
+            session=ks_session,
             auth_url=auth_url)
 
         # Determine which authentication plugin to use. First inspect the
         # auth_url to see the supported version. If both v3 and v2 are
         # supported, then use the highest version if possible.
+        user_id = kwargs.pop('user_id', None)
+        username = kwargs.pop('username', None)
+        password = kwargs.pop('password', None)
+        user_domain_name = kwargs.pop('user_domain_name', None)
+        user_domain_id = kwargs.pop('user_domain_id', None)
+        # project and tenant can be used interchangeably
+        project_id = (kwargs.pop('project_id', None) or
+                      kwargs.pop('tenant_id', None))
+        project_name = (kwargs.pop('project_name', None) or
+                        kwargs.pop('tenant_name', None))
+        project_domain_id = kwargs.pop('project_domain_id', None)
+        project_domain_name = kwargs.pop('project_domain_name', None)
         auth = None
-        if v3_auth_url and v2_auth_url:
-            user_domain_name = kwargs.get('user_domain_name', None)
-            user_domain_id = kwargs.get('user_domain_id', None)
-            project_domain_name = kwargs.get('project_domain_name', None)
-            project_domain_id = kwargs.get('project_domain_id', None)
 
-            # support both v2 and v3 auth. Use v3 if domain information is
-            # provided.
-            if (user_domain_name or user_domain_id or project_domain_name or
-                    project_domain_id):
-                auth = self._get_keystone_v3_auth(v3_auth_url, **kwargs)
-            else:
-                auth = self._get_keystone_v2_auth(v2_auth_url, **kwargs)
-        elif v3_auth_url:
-            # support only v3
-            auth = self._get_keystone_v3_auth(v3_auth_url, **kwargs)
-        elif v2_auth_url:
-            # support only v2
-            auth = self._get_keystone_v2_auth(v2_auth_url, **kwargs)
+        use_domain = (user_domain_id or
+                      user_domain_name or
+                      project_domain_id or
+                      project_domain_name)
+        use_v3 = v3_auth_url and (use_domain or (not v2_auth_url))
+        use_v2 = v2_auth_url and not use_domain
+
+        if use_v3:
+            auth = v3_auth.Password(
+                v3_auth_url,
+                user_id=user_id,
+                username=username,
+                password=password,
+                user_domain_id=user_domain_id,
+                user_domain_name=user_domain_name,
+                project_id=project_id,
+                project_name=project_name,
+                project_domain_id=project_domain_id,
+                project_domain_name=project_domain_name)
+        elif use_v2:
+            auth = v2_auth.Password(
+                v2_auth_url,
+                username,
+                password,
+                tenant_id=project_id,
+                tenant_name=project_name)
         else:
-            raise exc.CommandError(_('Unable to determine the Keystone '
-                                     'version to authenticate with using the '
-                                     'given auth_url.'))
+            # if we get here it means domain information is provided
+            # (caller meant to use Keystone V3) but the auth url is
+            # actually Keystone V2. Obviously we can't authenticate a V3
+            # user using V2.
+            exc.CommandError("Credential and auth_url mismatch. The given "
+                             "auth_url is using Keystone V2 endpoint, which "
+                             "may not able to handle Keystone V3 credentials. "
+                             "Please provide a correct Keystone V3 auth_url.")
 
-        return auth
+        ks_session.auth = auth
+        return ks_session
+
+    def _get_kwargs_for_create_session(self, args):
+        if not args.os_username:
+            raise exc.CommandError(
+                _("You must provide a username via"
+                  " either --os-username or "
+                  "env[OS_USERNAME]"))
+
+        if not args.os_password:
+            # No password, If we've got a tty, try prompting for it
+            if hasattr(sys.stdin, 'isatty') and sys.stdin.isatty():
+                # Check for Ctl-D
+                try:
+                    args.os_password = getpass.getpass('OS Password: ')
+                except EOFError:
+                    pass
+            # No password because we didn't have a tty or the
+            # user Ctl-D when prompted.
+            if not args.os_password:
+                raise exc.CommandError(
+                    _("You must provide a password via "
+                      "either --os-password, "
+                      "env[OS_PASSWORD], "
+                      "or prompted response"))
+
+        # Validate password flow auth
+        project_info = (
+            args.os_tenant_name or args.os_tenant_id or (
+                args.os_project_name and (
+                    args.os_project_domain_name or
+                    args.os_project_domain_id
+                )
+            ) or args.os_project_id
+        )
+
+        if not project_info:
+            # tenant is deprecated in Keystone v3. Use the latest
+            # terminology instead.
+            raise exc.CommandError(
+                _("You must provide a project_id or project_name ("
+                  "with project_domain_name or project_domain_id) "
+                  "via "
+                  "  --os-project-id (env[OS_PROJECT_ID])"
+                  "  --os-project-name (env[OS_PROJECT_NAME]),"
+                  "  --os-project-domain-id "
+                  "(env[OS_PROJECT_DOMAIN_ID])"
+                  "  --os-project-domain-name "
+                  "(env[OS_PROJECT_DOMAIN_NAME])"))
+
+        if not args.os_auth_url:
+            raise exc.CommandError(
+                _("You must provide an auth url via"
+                  " either --os-auth-url or "
+                  "via env[OS_AUTH_URL]"))
+
+        kwargs = {
+            'auth_url': args.os_auth_url,
+            'username': args.os_username,
+            'user_id': args.os_user_id,
+            'user_domain_id': args.os_user_domain_id,
+            'user_domain_name': args.os_user_domain_name,
+            'password': args.os_password,
+            'tenant_name': args.os_tenant_name,
+            'tenant_id': args.os_tenant_id,
+            'project_name': args.os_project_name,
+            'project_id': args.os_project_id,
+            'project_domain_name': args.os_project_domain_name,
+            'project_domain_id': args.os_project_domain_id,
+            'insecure': args.insecure,
+            'cacert': args.os_cacert,
+            'cert': args.os_cert,
+            'key': args.os_key
+        }
+        return kwargs
+
+    def _get_versioned_client(self, api_version, args):
+        endpoint = self._get_bilean_url(args)
+        auth_token = args.os_auth_token
+
+        auth_req = (hasattr(args, 'func') and
+                    utils.is_authentication_required(args.func))
+        if not auth_req or (endpoint and auth_token):
+            kwargs = {
+                'token': auth_token,
+                'insecure': args.insecure,
+                'timeout': args.timeout,
+                'cacert': args.os_cacert,
+                'cert': args.os_cert,
+                'key': args.os_key,
+            }
+        else:
+            kwargs = self._get_kwargs_for_create_session(args)
+            kwargs = {'session': self._get_keystone_session(**kwargs)}
+
+        return bileanclient.Client(api_version, endpoint, **kwargs)
 
     def main(self, argv):
+
+        def _get_subparser(api_version):
+            try:
+                return self.get_subcommand_parser(api_version)
+            except ImportError as e:
+                if not str(e):
+                    # Add a generic import error message if the raised
+                    # ImportError has none.
+                    raise ImportError('Unable to import module. Re-run '
+                                      'with --debug for more info.')
+                raise
+
         # Parse args once to find version
+
+        # NOTE(flepied) Under Python3, parsed arguments are removed
+        # from the list so make a copy for the first parsing
+        base_argv = copy.deepcopy(argv)
         parser = self.get_base_parser()
-        (options, args) = parser.parse_known_args(argv)
-        self._setup_logging(options.debug)
-        self._setup_verbose(options.verbose)
+        (options, args) = parser.parse_known_args(base_argv)
+
+        try:
+            # NOTE(flaper87): Try to get the version from the
+            # bilean-url first. If no version was specified, fallback
+            # to the api-bilean-version arg. If both of these fail then
+            # fallback to the minimum supported one and let keystone
+            # do the magic.
+            endpoint = self._get_bilean_url(options)
+            endpoint, url_version = utils.strip_version(endpoint)
+        except ValueError:
+            # NOTE(flaper87): ValueError is raised if no endpoint is provided
+            url_version = None
 
         # build available subcommands based on version
-        api_version = options.bilean_api_version
-        subcommand_parser = self.get_subcommand_parser(api_version)
-        self.parser = subcommand_parser
+        try:
+            api_version = int(options.os_bilean_api_version or url_version or 1)
+            if api_version not in SUPPORTED_VERSIONS:
+                raise ValueError
+        except ValueError:
+            msg = ("Invalid API version parameter. "
+                   "Supported values are %s" % SUPPORTED_VERSIONS)
+            utils.exit(msg=msg)
 
         # Handle top-level --help/-h before attempting to parse
         # a command off the command line
-        if not args and options.help or not argv:
-            self.do_help(options)
+        if options.help or not argv:
+            parser = _get_subparser(api_version)
+            self.do_help(options, parser=parser)
             return 0
 
-        # Parse args again and call whatever callback was selected
-        args = subcommand_parser.parse_args(argv)
-
         # Short-circuit and deal with help command right away.
+        sub_parser = _get_subparser(api_version)
+        args = sub_parser.parse_args(argv)
+
         if args.func == self.do_help:
-            self.do_help(args)
+            self.do_help(args, parser=sub_parser)
             return 0
         elif args.func == self.do_bash_completion:
             self.do_bash_completion(args)
             return 0
 
-        if not args.os_username and not args.os_auth_token:
-            raise exc.CommandError(_("You must provide a username via either "
-                                     "--os-username or env[OS_USERNAME] "
-                                     "or a token via --os-auth-token or "
-                                     "env[OS_AUTH_TOKEN]"))
+        if not args.os_password and options.os_password:
+            args.os_password = options.os_password
 
-        if not args.os_password and not args.os_auth_token:
-            raise exc.CommandError(_("You must provide a password via either "
-                                     "--os-password or env[OS_PASSWORD] "
-                                     "or a token via --os-auth-token or "
-                                     "env[OS_AUTH_TOKEN]"))
-
-        if args.os_no_client_auth:
-            if not args.bilean_url:
-                raise exc.CommandError(_("If you specify --os-no-client-auth "
-                                         "you must also specify a Bilean API "
-                                         "URL via either --bilean-url or "
-                                         "env[HEAT_URL]"))
-        else:
-            # Tenant/project name or ID is needed to make keystoneclient
-            # retrieve a service catalog, it's not required if
-            # os_no_client_auth is specified, neither is the auth URL
-
-            if not (args.os_tenant_id or args.os_tenant_name or
-                    args.os_project_id or args.os_project_name):
-                raise exc.CommandError(
-                    _("You must provide a tenant id via either "
-                      "--os-tenant-id or env[OS_TENANT_ID] or a tenant name "
-                      "via either --os-tenant-name or env[OS_TENANT_NAME] "
-                      "or a project id via either --os-project-id or "
-                      "env[OS_PROJECT_ID] or a project name via "
-                      "either --os-project-name or env[OS_PROJECT_NAME]"))
-
-            if not args.os_auth_url:
-                raise exc.CommandError(_("You must provide an auth url via "
-                                         "either --os-auth-url or via "
-                                         "env[OS_AUTH_URL]"))
-
-        kwargs = {
-            'insecure': args.insecure,
-            'cacert': args.os_cacert,
-            'cert': args.os_cert,
-            'key': args.os_key,
-            'timeout': args.api_timeout
-        }
-
-        endpoint = args.bilean_url
-        service_type = args.os_service_type or 'billing'
-        if args.os_no_client_auth:
-            # Do not use session since no_client_auth means using bilean to
-            # to authenticate
-            kwargs = {
-                'username': args.os_username,
-                'password': args.os_password,
-                'auth_url': args.os_auth_url,
-                'token': args.os_auth_token,
-                'include_pass': args.include_password,
-                'insecure': args.insecure,
-                'timeout': args.api_timeout
-            }
-        else:
-            keystone_session = self._get_keystone_session(**kwargs)
-            project_id = args.os_project_id or args.os_tenant_id
-            project_name = args.os_project_name or args.os_tenant_name
-            endpoint_type = args.os_endpoint_type or 'publicURL'
-            kwargs = {
-                'username': args.os_username,
-                'user_id': args.os_user_id,
-                'user_domain_id': args.os_user_domain_id,
-                'user_domain_name': args.os_user_domain_name,
-                'password': args.os_password,
-                'auth_token': args.os_auth_token,
-                'project_id': project_id,
-                'project_name': project_name,
-                'project_domain_id': args.os_project_domain_id,
-                'project_domain_name': args.os_project_domain_name,
-            }
-            keystone_auth = self._get_keystone_auth(keystone_session,
-                                                    args.os_auth_url,
-                                                    **kwargs)
-            if not endpoint:
-                svc_type = service_type
-                region_name = args.os_region_name
-                endpoint = keystone_auth.get_endpoint(keystone_session,
-                                                      service_type=svc_type,
-                                                      interface=endpoint_type,
-                                                      region_name=region_name)
-            kwargs = {
-                'auth_url': args.os_auth_url,
-                'session': keystone_session,
-                'auth': keystone_auth,
-                'service_type': service_type,
-                'endpoint_type': endpoint_type,
-                'region_name': args.os_region_name,
-                'username': args.os_username,
-                'password': args.os_password,
-                'include_pass': args.include_password
-            }
-
-        client = bilean_client.Client(api_version, endpoint, **kwargs)
+        if args.debug:
+            # Set up the root logger to debug so that the submodules can
+            # print debug messages
+            logging.basicConfig(level=logging.DEBUG)
+            # for iso8601 < 0.1.11
+            logging.getLogger('iso8601').setLevel(logging.WARNING)
+        LOG = logging.getLogger('bileanclient')
+        LOG.addHandler(logging.StreamHandler())
+        LOG.setLevel(logging.DEBUG if args.debug else logging.INFO)
 
         profile = osprofiler_profiler and options.profile
         if profile:
             osprofiler_profiler.init(options.profile)
 
-        args.func(client, args)
+        client = self._get_versioned_client(api_version, args)
 
-        if profile:
-            trace_id = osprofiler_profiler.get().get_base_id()
-            print(_("Trace ID: %s") % trace_id)
-            print(_("To display trace use next command:\n"
-                  "osprofiler trace show --html %s ") % trace_id)
-
-    def do_bash_completion(self, args):
-        """Prints all of the commands and options to stdout.
-
-        The bilean.bash_completion script doesn't have to hard code them.
-        """
-        commands = set()
-        options = set()
-        for sc_str, sc in self.subcommands.items():
-            commands.add(sc_str)
-            for option in list(sc._optionals._option_string_actions):
-                options.add(option)
-
-        commands.remove('bash-completion')
-        commands.remove('bash_completion')
-        print(' '.join(commands | options))
+        try:
+            args.func(client, args)
+        except exc.Unauthorized:
+            raise exc.CommandError("Invalid OpenStack Identity credentials.")
+        finally:
+            if profile:
+                trace_id = osprofiler_profiler.get().get_base_id()
+                print("Profiling trace ID: %s" % trace_id)
+                print("To display trace use next command:\n"
+                      "osprofiler trace show --html %s " % trace_id)
 
     @utils.arg('command', metavar='<subcommand>', nargs='?',
-               help=_('Display help for <subcommand>.'))
-    def do_help(self, args):
+               help='Display help for <subcommand>.')
+    def do_help(self, args, parser):
         """Display help about this program or one of its subcommands."""
-        if getattr(args, 'command', None):
+        command = getattr(args, 'command', '')
+
+        if command:
             if args.command in self.subcommands:
                 self.subcommands[args.command].print_help()
             else:
                 raise exc.CommandError("'%s' is not a valid subcommand" %
                                        args.command)
         else:
-            self.parser.print_help()
+            parser.print_help()
+
+        if not args.os_bilean_api_version or args.os_bilean_api_version == '2':
+            # NOTE(NiallBunting) This currently assumes that the only versions
+            # are one and two.
+            try:
+                if command is None:
+                    print("\nRun `bilean --os-bilean-api-version 1 help`"
+                          " for v1 help")
+                else:
+                    self.get_subcommand_parser(1)
+                    if command in self.subcommands:
+                        command = ' ' + command
+                        print(("\nRun `bilean --os-bilean-api-version 1 help%s`"
+                               " for v1 help") % (command or ''))
+            except ImportError:
+                pass
+
+    def do_bash_completion(self, _args):
+        """Prints arguments for bash_completion.
+
+        Prints all of the commands and options to stdout so that the
+        bilean.bash_completion script doesn't have to hard code them.
+        """
+        commands = set()
+        options = set()
+        for sc_str, sc in self.subcommands.items():
+            commands.add(sc_str)
+            for option in sc._optionals._option_string_actions.keys():
+                options.add(option)
+
+        commands.remove('bash_completion')
+        commands.remove('bash-completion')
+        print(' '.join(commands | options))
 
 
 class HelpFormatter(argparse.HelpFormatter):
@@ -694,21 +576,13 @@ class HelpFormatter(argparse.HelpFormatter):
         super(HelpFormatter, self).start_section(heading)
 
 
-def main(args=None):
+def main():
     try:
-        if args is None:
-            args = sys.argv[1:]
-
-        BileanShell().main(args)
+        argv = [encodeutils.safe_decode(a) for a in sys.argv[1:]]
+        BileanShell().main(argv)
     except KeyboardInterrupt:
-        print(_("... terminating bilean client"), file=sys.stderr)
-        sys.exit(130)
+        utils.exit('... terminating bilean client', exit_code=130)
     except Exception as e:
-        if '--debug' in args or '-d' in args:
-            raise
-        else:
-            print(encodeutils.safe_encode(six.text_type(e)), file=sys.stderr)
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
+        if utils.debug_enabled(argv) is True:
+            traceback.print_exc()
+        utils.exit(encodeutils.exception_to_unicode(e))
