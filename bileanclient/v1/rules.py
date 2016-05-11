@@ -28,6 +28,16 @@ class Rule(base.Resource):
 class RuleManager(base.BaseManager):
     resource_class = Rule
 
+    def _list(self, url, response_key, obj_class=None, body=None):
+        resp, body = self.client.get(url)
+
+        if obj_class is None:
+            obj_class = self.resource_class
+
+        data = body[response_key]
+        return ([obj_class(self, res, loaded=True) for res in data if res],
+                resp)
+
     def list(self, **kwargs):
         """Retrieve a list of rules.
 
@@ -37,7 +47,7 @@ class RuleManager(base.BaseManager):
             '''Paginate rules, even if more than API limit.'''
             current_limit = int(params.get('limit') or 0)
             url = '/rules?%s' % parse.urlencode(params, True)
-            rules = self._list(url, 'rules')
+            rules, resp = self._list(url, 'rules')
             for rule in rules:
                 yield rule
 
@@ -49,6 +59,7 @@ class RuleManager(base.BaseManager):
                 for rule in paginate(params):
                     yield rule
 
+        return_request_id = kwargs.get('return_req_id', None)
         params = {}
         if 'filters' in kwargs:
             filters = kwargs.pop('filters')
@@ -61,13 +72,25 @@ class RuleManager(base.BaseManager):
         return paginate(params)
 
     def create(self, **kwargs):
-        """Create a rule."""
-        return self._post('/rules', json=kwargs, response_key='rule')
+        """Create a rule by given data."""
+        url = '/rules'
+        resp, body = self.client.post(url, data=kwargs)
+        rule = body.get('rule')
+        return self.resource_class(self, rule, loaded=True)
 
     def get(self, rule_id):
-        """Get a specific rule."""
-        return self._get('/rules/%s' % rule_id, 'rule')
+        """Get a specific rule.
+
+        :param rule_id: Id of the rule to get
+        """
+        url = '/rules/%s' % parse.quote(str(rule_id))
+        resp, body = self.client.get(url)
+        data = body.get('rule')
+        return self.resource_class(self, data, loaded=True)
 
     def delete(self, rule_id):
-        """Delete a specific rule."""
-        return self._delete('/rules/%s' % rule_id)
+        """Delete a specific rule.
+
+        :param rule_id: Id of the rule to delete
+        """
+        return self._delete('/rules/%s' % parse.quote(str(rule_id)))

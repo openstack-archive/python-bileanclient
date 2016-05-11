@@ -19,6 +19,8 @@ from six.moves.urllib import parse
 
 from bileanclient.openstack.common.apiclient import base
 
+OS_REQ_ID_HDR = 'x-openstack-request-id'
+
 
 class User(base.Resource):
     def __repr__(self):
@@ -72,7 +74,7 @@ class UserManager(base.BaseManager):
             if value:
                 params[key] = value
 
-        return paginate(params)
+        return paginate(params, return_request_id)
 
     def get(self, user_id, return_request_id=None):
         """Get the details for a specific user.

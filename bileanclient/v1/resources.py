@@ -28,6 +28,16 @@ class BileanResource(base.Resource):
 class ResourceManager(base.BaseManager):
     resource_class = BileanResource
 
+    def _list(self, url, response_key, obj_class=None, body=None):
+        resp, body = self.client.get(url)
+
+        if obj_class is None:
+            obj_class = self.resource_class
+
+        data = body[response_key]
+        return ([obj_class(self, res, loaded=True) for res in data if res],
+                resp)
+
     def list(self, **kwargs):
         """Retrieve a list of resources.
 
@@ -37,7 +47,7 @@ class ResourceManager(base.BaseManager):
             '''Paginate resources, even if more than API limit.'''
             current_limit = int(params.get('limit') or 0)
             url = '/resources?%s' % parse.urlencode(params, True)
-            resources = self._list(url, 'resources')
+            resources, resp = self._list(url, 'resources')
             for resource in resources:
                 yield resource
 
@@ -65,4 +75,6 @@ class ResourceManager(base.BaseManager):
 
         :param resource_id: ID of the resource
         """
-        return self._get('/resources/%s' % resource_id, 'resource')
+        url = '/resources/%s' % parse.quote(str(resource_id))
+        resp, body = self.client.get(url)
+        return self.resource_class(self, body.get('resource'), loaded=True)

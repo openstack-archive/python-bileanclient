@@ -28,6 +28,16 @@ class Policy(base.Resource):
 class PolicyManager(base.BaseManager):
     resource_class = Policy
 
+    def _list(self, url, response_key, obj_class=None, body=None):
+        resp, body = self.client.get(url)
+
+        if obj_class is None:
+            obj_class = self.resource_class
+
+        data = body[response_key]
+        return ([obj_class(self, res, loaded=True) for res in data if res],
+                resp)
+
     def list(self, **kwargs):
         """Retrieve a list of policies.
 
@@ -37,7 +47,7 @@ class PolicyManager(base.BaseManager):
             '''Paginate policies, even if more than API limit.'''
             current_limit = int(params.get('limit') or 0)
             url = '/policies?%s' % parse.urlencode(params, True)
-            policies = self._list(url, 'policies')
+            policies, resq = self._list(url, 'policies')
             for policy in policies:
                 yield policy
 
@@ -61,18 +71,22 @@ class PolicyManager(base.BaseManager):
         return paginate(params)
 
     def create(self, **kwargs):
-        """Create a policy."""
-        return self._post('/policies', json=kwargs, response_key='policy')
+        """Create a new policy."""
+        resq, body = self.client.post(url, data=kwargs)
+        return self.resource_class(self, body.get('policy'), loaded=True)
 
     def get(self, policy_id):
         """Get a specific policy."""
-        return self._get('/policies/%s' % policy_id, 'policy')
+        url = '/policies/%s' % parse.quote(str(policy_id))
+        resq, body = self.client.get(url)
+        return self.resource_class(self, body.get('policy'), loaded=True)
 
     def action(self, policy_id, **kwargs):
         """Perform specified action on a policy."""
-        url = '/policies/%s/action' % policy_id
-        return self._post(url, json=kwargs, response_key='policy')
+        url = '/policies/%s/action' % parse.quote(str(policy_id))
+        resq, body = self.client.post(url, data=kwargs)
+        return self.resource_class(self, body.get('policy'), loaded=True)
 
     def delete(self, policy_id):
         """Delete a specific policy."""
-        return self._delete('/policies/%s' % policy_id)
+        return self._delete('/policies/%s' % parse.quote(str(policy_id)))
