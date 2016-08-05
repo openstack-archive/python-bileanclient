@@ -72,7 +72,7 @@ class PolicyManager(base.BaseManager):
 
     def create(self, **kwargs):
         """Create a new policy."""
-        resq, body = self.client.post(url, data=kwargs)
+        resq, body = self.client.post('/policies', data=kwargs)
         return self.resource_class(self, body.get('policy'), loaded=True)
 
     def get(self, policy_id):
