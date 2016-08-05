@@ -19,6 +19,8 @@ from six.moves.urllib import parse
 
 from bileanclient.openstack.common.apiclient import base
 
+OS_REQ_ID_HDR = 'x-openstack-request-id'
+
 
 class Rule(base.Resource):
     def __repr__(self):
@@ -43,13 +45,16 @@ class RuleManager(base.BaseManager):
 
         :rtype: list of :class:`Rule`.
         """
-        def paginate(params):
+        def paginate(params, return_request_id=None):
             '''Paginate rules, even if more than API limit.'''
             current_limit = int(params.get('limit') or 0)
             url = '/rules?%s' % parse.urlencode(params, True)
             rules, resp = self._list(url, 'rules')
             for rule in rules:
                 yield rule
+
+            if return_request_id is not None:
+                return_request_id.append(resp.headers.get(OS_REQ_ID_HDR, None))
 
             num_rules = len(rules)
             remaining_limit = current_limit - num_rules
@@ -69,7 +74,7 @@ class RuleManager(base.BaseManager):
             if value:
                 params[key] = value
 
-        return paginate(params)
+        return paginate(params, return_request_id)
 
     def create(self, **kwargs):
         """Create a rule by given data."""

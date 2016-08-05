@@ -22,10 +22,7 @@ from __future__ import print_function
 import argparse
 import copy
 import getpass
-import hashlib
-import json
 import logging
-import os
 import sys
 import traceback
 
@@ -46,7 +43,7 @@ from keystoneclient import session
 
 osprofiler_profiler = importutils.try_import("osprofiler.profiler")
 
-SUPPORTED_VERSIONS = [1,]
+SUPPORTED_VERSIONS = [1, ]
 
 
 class BileanShell(object):
@@ -160,7 +157,8 @@ class BileanShell(object):
         parser.add_argument('--os-bilean-api-version',
                             default=utils.env('OS_BILEAN_API_VERSION',
                                               default=None),
-                            help='Defaults to env[OS_BILEAN_API_VERSION] or 2.')
+                            help='Defaults to env[OS_BILEAN_API_VERSION] or '
+                                 '2.')
 
         parser.add_argument('--os_bilean_api_version',
                             help=argparse.SUPPRESS)
@@ -464,7 +462,8 @@ class BileanShell(object):
 
         # build available subcommands based on version
         try:
-            api_version = int(options.os_bilean_api_version or url_version or 1)
+            api_version = options.os_bilean_api_version or url_version or 1
+            api_version = int(api_version)
             if api_version not in SUPPORTED_VERSIONS:
                 raise ValueError
         except ValueError:
@@ -546,8 +545,8 @@ class BileanShell(object):
                     self.get_subcommand_parser(1)
                     if command in self.subcommands:
                         command = ' ' + command
-                        print(("\nRun `bilean --os-bilean-api-version 1 help%s`"
-                               " for v1 help") % (command or ''))
+                        print(("\nRun `bilean --os-bilean-api-version 1 "
+                               "help%s` for v1 help") % (command or ''))
             except ImportError:
                 pass
 
