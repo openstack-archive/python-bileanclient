@@ -172,9 +172,8 @@ class TestClient(testtools.TestCase):
         self.assertIn(self.endpoint, comm_err.message)
 
     def test_connection_refused(self):
-        """
+        """Should receive a CommunicationError if connection refused.
 
-        Should receive a CommunicationError if connection refused.
         And the error should list the host and port that refused the
         connection
         """

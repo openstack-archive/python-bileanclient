@@ -15,11 +15,6 @@
 #    under the License.
 
 import argparse
-try:
-    from collections import OrderedDict
-except ImportError:
-    from ordereddict import OrderedDict
-import hashlib
 import json
 import logging
 import os
@@ -31,7 +26,6 @@ import fixtures
 from keystoneclient import exceptions as ks_exc
 from keystoneclient import fixture as ks_fixture
 import mock
-import requests
 from requests_mock.contrib import fixture as rm_fixture
 import six
 
@@ -481,7 +475,8 @@ class ShellTestWithKeystoneV3Auth(ShellTest):
         self.assertRaises(exc.CommandError, bilean_shell.main, args.split())
 
     def test_bash_completion(self):
-        stdout, stderr = self.shell('--os-bilean-api-version 1 bash_completion')
+        stdout, stderr = self.shell('--os-bilean-api-version 1 '
+                                    'bash_completion')
         # just check we have some output
         required = [
             '--value',
