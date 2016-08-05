@@ -17,9 +17,9 @@
 
 from bileanclient.common import http
 from bileanclient.v1 import policies
+from bileanclient.v1 import resources
 from bileanclient.v1 import rules
 from bileanclient.v1 import users
-from bileanclient.v1 import resources
 
 
 class Client(object):
