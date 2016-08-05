@@ -13,7 +13,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 import collections
-import mock
 from six import moves
 import sys
 import testtools
@@ -38,20 +37,20 @@ class ShellTest(testtools.TestCase):
             'status=ACTIVE'])
         self.assertEqual({'name': 'bilean_user',
                           'status': 'ACTIVE'}, p)
- 
+
     def test_format_parameters_multiple_semicolon_values(self):
         p = utils.format_parameters([
             'status=ACTIVE',
             'name=bilean;user'])
         self.assertEqual({'name': 'bilean;user',
                           'status': 'ACTIVE'}, p)
- 
+
     def test_format_parameters_parse_semicolon_false(self):
         p = utils.format_parameters(
             ['name=bilean;a=b'],
             parse_semicolon=False)
         self.assertEqual({'name': 'bilean;a=b'}, p)
- 
+
     def test_format_parameters_multiple_values_per_pamaters(self):
         p = utils.format_parameters([
             'status=ACTIVE',
@@ -59,21 +58,21 @@ class ShellTest(testtools.TestCase):
         self.assertIn('status', p)
         self.assertIn('ACTIVE', p['status'])
         self.assertIn('FREE', p['status'])
- 
+
     def test_format_parameter_bad_parameter(self):
         params = ['name=bilean_user;statusACTIVE']
         ex = self.assertRaises(exc.CommandError,
                                utils.format_parameters, params)
         self.assertEqual('Malformed parameter(statusACTIVE). '
                          'Use the key=value format.', str(ex))
- 
+
     def test_format_multiple_bad_parameter(self):
         params = ['name=bilean_user', 'statusACTIVE']
         ex = self.assertRaises(exc.CommandError,
                                utils.format_parameters, params)
         self.assertEqual('Malformed parameter(statusACTIVE). '
                          'Use the key=value format.', str(ex))
- 
+
     def test_link_formatter(self):
         self.assertEqual('', utils.link_formatter(None))
         self.assertEqual('', utils.link_formatter([]))
