@@ -21,6 +21,7 @@ import testtools
 FAKE_ID = 'FAKE_ID'
 fake_resource = {'id': FAKE_ID}
 
+
 class ResourceManagerTest(testtools.TestCase):
 
     def setUp(self):
@@ -29,22 +30,22 @@ class ResourceManagerTest(testtools.TestCase):
 
     @mock.patch.object(ResourceManager, '_list')
     def test_list_resource(self, mock_list):
-        mock_list.return_value = [fake_resource]
+        mock_list.return_value = ([fake_resource], None)
         result = self.mgr.list()
-        self.assertEqual(fake_resource, result.next())
+        self.assertEqual(fake_resource, next(result))
         # Make sure url is correct.
         mock_list.assert_called_once_with('/resources?', 'resources')
 
     @mock.patch.object(ResourceManager, '_list')
     def test_list_resource_with_kwargs(self, mock_list):
-        mock_list.return_value = [fake_resource]
+        mock_list.return_value = ([fake_resource], None)
         kwargs = {'limit': 2,
                   'marker': FAKE_ID,
                   'filters': {
                       'resource_type': 'os.nova.server',
                       'user_id': FAKE_ID}}
         result = self.mgr.list(**kwargs)
-        self.assertEqual(fake_resource, result.next())
+        self.assertEqual(fake_resource, next(result))
         # Make sure url is correct.
         self.assertEqual(1, mock_list.call_count)
         args = mock_list.call_args
@@ -58,8 +59,3 @@ class ResourceManagerTest(testtools.TestCase):
                                'resource_type': ['os.nova.server'],
                                'user_id': [FAKE_ID]}
         self.assertEqual(expected_query_dict, query_params)
-
-    @mock.patch.object(ResourceManager, '_get')
-    def test_get_resource(self, mock_get):
-        self.mgr.get(FAKE_ID)
-        mock_get.assert_called_once_with('/resources/%s' % FAKE_ID, 'resource')
