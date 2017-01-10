@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-#
 # bileanclient documentation build configuration file, created by
 # sphinx-quickstart on Sun Apr 17 22:38:31 2016.
 #
