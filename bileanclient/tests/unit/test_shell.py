@@ -15,7 +15,6 @@
 #    under the License.
 
 import argparse
-import json
 import logging
 import os
 import sys
@@ -28,6 +27,8 @@ from keystoneclient import fixture as ks_fixture
 import mock
 from requests_mock.contrib import fixture as rm_fixture
 import six
+
+from oslo_serialization import jsonutils
 
 from bileanclient.common import utils
 from bileanclient import exc
@@ -251,7 +252,7 @@ class ShellTest(testutils.TestCase):
         # make sure our auth plugin is invoked with the correct args
         self.assertFalse(self.v3_auth.called)
 
-        body = json.loads(self.v2_auth.last_request.body)
+        body = jsonutils.loads(self.v2_auth.last_request.body)
 
         self.assertEqual(self.auth_env['OS_TENANT_NAME'],
                          body['auth']['tenantName'])
@@ -448,7 +449,7 @@ class ShellTestWithKeystoneV3Auth(ShellTest):
     def _assert_auth_plugin_args(self):
         self.assertFalse(self.v2_auth.called)
 
-        body = json.loads(self.v3_auth.last_request.body)
+        body = jsonutils.loads(self.v3_auth.last_request.body)
         user = body['auth']['identity']['password']['user']
 
         self.assertEqual(self.auth_env['OS_USERNAME'], user['name'])

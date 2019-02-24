@@ -14,10 +14,11 @@
 #    under the License.
 
 import copy
-import json
 import six
 import six.moves.urllib.parse as urlparse
 import testtools
+
+from oslo_serialization import jsonutils
 
 
 class FakeAPI(object):
@@ -38,7 +39,7 @@ class FakeAPI(object):
         data = fixture[1]
         if isinstance(fixture[1], six.string_types):
             try:
-                data = json.loads(fixture[1])
+                data = jsonutils.loads(fixture[1])
             except ValueError:
                 data = six.StringIO(fixture[1])
 
@@ -134,7 +135,7 @@ class FakeResponse(object):
         return self.content
 
     def json(self, **kwargs):
-        return self.body and json.loads(self.text) or ""
+        return self.body and jsonutils.loads(self.text) or ""
 
     def iter_content(self, chunk_size=1, decode_unicode=False):
         while True:
@@ -202,7 +203,7 @@ def build_call_record(method, url, headers, data):
         # NOTE(flwang): For image update, the data will be a 'list' which
         # contains operation dict, such as: [{"op": "remove", "path": "/a"}]
         try:
-            data = json.loads(data)
+            data = jsonutils.loads(data)
         except ValueError:
             return (method, url, headers or {}, data)
         data = [sorted(d.items()) for d in data]
