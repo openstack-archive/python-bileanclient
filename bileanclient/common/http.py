@@ -25,11 +25,7 @@ import requests
 import six
 import warnings
 
-try:
-    import json
-except ImportError:
-    import simplejson as json
-
+from oslo_serialization import jsonutils
 from oslo_utils import encodeutils
 
 from bileanclient.common import utils
@@ -64,7 +60,7 @@ class _BaseHTTPClient(object):
         data = kwargs.pop("data", None)
         if data is not None and not isinstance(data, six.string_types):
             try:
-                data = json.dumps(data)
+                data = jsonutils.dumps(data)
                 content_type = 'application/json'
             except TypeError:
                 # Here we assume it's
@@ -102,7 +98,8 @@ class _BaseHTTPClient(object):
             else:
                 body_iter = six.StringIO(content)
                 try:
-                    body_iter = json.loads(''.join([c for c in body_iter]))
+                    body_iter = jsonutils.loads(''.join([c
+                                                         for c in body_iter]))
                 except ValueError:
                     body_iter = None
 

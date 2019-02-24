@@ -12,8 +12,8 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+
 import functools
-import json
 
 from keystoneclient.auth import token_endpoint
 from keystoneclient import session
@@ -26,6 +26,8 @@ from testscenarios import load_tests_apply_scenarios as load_tests  # noqa
 import testtools
 from testtools import matchers
 import types
+
+from oslo_serialization import jsonutils
 
 import bileanclient
 from bileanclient.common import http
@@ -257,7 +259,7 @@ class TestClient(testtools.TestCase):
 
         self.assertEqual(text, resp.text)
         self.assertIsInstance(self.mock.last_request.body, six.string_types)
-        self.assertEqual(data, json.loads(self.mock.last_request.body))
+        self.assertEqual(data, jsonutils.loads(self.mock.last_request.body))
 
     def test_http_chunked_response(self):
         data = "TEST"
